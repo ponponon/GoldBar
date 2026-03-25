@@ -1,1 +1,37 @@
 # 项目功能列表 (FEATURE)
+
+本文件详细记录了 GoldBar 已实现的所有功能点，以便在更换 AI 协作或重新构建项目时作为核心参考。
+
+## 💎 核心功能
+
+### 1. 实时金价追踪 (Real-time Gold Price)
+- **数据源**: `https://api.gold-api.com/price/XAU`
+- **内容**: 追踪 XAU (伦敦金) 的国际实时行情（美元/盎司）。
+- **刷新频率**: 30 秒自动刷新。
+
+### 2. 货币与单位换算 (Currency & Unit Conversion)
+- **汇率数据源**: `https://open.er-api.com/v6/latest/USD`
+- **逻辑**: 自动获取 USD/CNY 实时汇率。
+- **换算公式**: `(国际金价 * 汇率) / 31.1034768`
+- **目标单位**: 人民币/克 (CNY/g)。
+
+### 3. macOS 菜单栏集成 (Menu Bar Extra)
+- **常驻显示**: 在 macOS 菜单栏直接显示单价。
+- **状态图标**: 动态显示涨跌箭头 (▲/▼) 和金砖图标 (`goldbar.fill`)。
+- **无 Dock 干扰**: 应用以 `.accessory` 策略运行，不会在 Dock 栏显示。
+
+### 4. 交互式详情视图 (Detail Popover)
+- **实时看板**: 点击菜单栏图标弹出。
+- **辅助信息**: 显示当前汇率、国际原始金价（美元/盎司）。
+- **更新时间**: 记录上一次数据获取的时间。
+- **涨跌幅统计**: 实时计算当前价与上一价格的差值。
+
+### 5. 操作控制 (Controls)
+- **立即刷新**: 强制触发 API 调用获取最新数据。
+- **退出应用**: 正常关闭程序。
+
+## 🏗️ 技术实现方案
+- **框架**: SwiftUI (macOS 13+).
+- **架构**: MVVM (GoldPriceManager 作为 ObservableObject 控制数据流)。
+- **并发处理**: 使用 Swift Concurrency (async/await) 进行异步 API 调用。
+- **状态监控**: 使用 Combine 定时触发刷新任务。
