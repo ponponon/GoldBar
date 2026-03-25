@@ -38,12 +38,10 @@ enum Currency: String, CaseIterable, Codable {
 @MainActor
 class GoldPriceManager: ObservableObject {
     @Published var currentPriceUSD: Double = 0.0
-    @Published var currentDisplayPrice: Double = 0.0
-    @Published var previousDisplayPrice: Double = 0.0
+    @Published var previousPriceUSD: Double = 0.0
     @Published var selectedCurrency: Currency = .CNY {
         didSet {
             UserDefaults.standard.set(selectedCurrency.rawValue, forKey: "SelectedCurrency")
-            updateDisplayPrice()
         }
     }
     @Published var exchangeRates: [String: Double] = [:]
@@ -52,24 +50,31 @@ class GoldPriceManager: ObservableObject {
     private var timer: AnyCancellable?
     private let ounceToGram: Double = 31.1034768
     
+    var currentDisplayPrice: Double {
+        convertUSDToSelectedCurrency(currentPriceUSD)
+    }
+    
+    var previousDisplayPrice: Double {
+        convertUSDToSelectedCurrency(previousPriceUSD)
+    }
+    
     var isPositiveChange: Bool {
-        currentDisplayPrice >= previousDisplayPrice
+        currentPriceUSD >= previousPriceUSD
     }
     
     var changeString: String {
-        let diff = currentDisplayPrice - previousDisplayPrice
-        let sign = diff >= 0 ? "+" : ""
-        return "\(sign)\(String(format: "%.2f", diff))"
+        guard previousPriceUSD != 0 else { return "+0.00%" }
+        let diffPercent = ((currentPriceUSD - previousPriceUSD) / previousPriceUSD) * 100
+        let sign = diffPercent >= 0 ? "+" : ""
+        return "\(sign)\(String(format: "%.2f", diffPercent))%"
     }
     
     init() {
-        // Load saved currency preference
         if let savedCurrency = UserDefaults.standard.string(forKey: "SelectedCurrency"),
            let currency = Currency(rawValue: savedCurrency) {
             self.selectedCurrency = currency
         }
         
-        // Initial fetch
         Task {
             await fetchExchangeRates()
             await fetchPrice()
@@ -96,8 +101,6 @@ class GoldPriceManager: ObservableObject {
             let result = try JSONDecoder().decode(ExchangeResponse.self, from: data)
             if result.result == "success" {
                 self.exchangeRates = result.rates
-                updateDisplayPrice()
-                print("Fetched exchange rates successfully.")
             }
         } catch {
             print("Error fetching exchange rates: \(error)")
@@ -111,29 +114,39 @@ class GoldPriceManager: ObservableObject {
             let (data, _) = try await URLSession.shared.data(from: url)
             let result = try JSONDecoder().decode(GoldResponse.self, from: data)
             
+            if currentPriceUSD != 0 && abs(result.price - currentPriceUSD) > 0.0001 {
+                previousPriceUSD = currentPriceUSD
+            } else if currentPriceUSD == 0 {
+                previousPriceUSD = result.price
+            }
+            
             self.currentPriceUSD = result.price
-            updateDisplayPrice()
             lastUpdated = Date()
-            print("Fetched gold price (USD/oz): \(currentPriceUSD), Display: \(currentDisplayPrice) \(selectedCurrency.rawValue)")
         } catch {
             print("Error fetching gold price: \(error)")
             if currentPriceUSD == 0 {
-                currentPriceUSD = 2150.45
-                updateDisplayPrice()
+                let mockPrice = 2150.45
+                previousPriceUSD = mockPrice
+                currentPriceUSD = mockPrice
             }
         }
     }
     
-    private func updateDisplayPrice() {
-        let rate = exchangeRates[selectedCurrency.rawValue] ?? (selectedCurrency == .USD ? 1.0 : 7.2)
-        let priceInSelectedCurrency = (currentPriceUSD * rate) / ounceToGram
-        
-        if currentDisplayPrice != 0 && abs(priceInSelectedCurrency - currentDisplayPrice) > 0.001 {
-            previousDisplayPrice = currentDisplayPrice
-        } else if currentDisplayPrice == 0 {
-            previousDisplayPrice = priceInSelectedCurrency
+    private func convertUSDToSelectedCurrency(_ priceUSD: Double) -> Double {
+        let rate = exchangeRates[selectedCurrency.rawValue] ?? defaultRate(for: selectedCurrency)
+        return (priceUSD * rate) / ounceToGram
+    }
+    
+    private func defaultRate(for currency: Currency) -> Double {
+        switch currency {
+        case .USD:
+            return 1.0
+        case .CNY:
+            return 7.2
+        case .JPY:
+            return 150.0
+        case .EUR:
+            return 0.92
         }
-        
-        currentDisplayPrice = priceInSelectedCurrency
     }
 }
