@@ -7,7 +7,7 @@ struct GoldResponse: Codable {
 
 struct ExchangeResponse: Codable {
     let result: String
-    let conversion_rate: Double
+    let rates: [String: Double]
 }
 
 @MainActor
@@ -54,14 +54,14 @@ class GoldPriceManager: ObservableObject {
     
     func fetchExchangeRate() async {
         // Using a public exchange rate API (USD to CNY)
-        // Note: In a real app, you might want to use a more stable/paid API key
-        guard let url = URL(string: "https://v6.exchangerate-api.com/v6/latest/USD") else { return }
+        // This endpoint does not require an API key
+        guard let url = URL(string: "https://open.er-api.com/v6/latest/USD") else { return }
         
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             let result = try JSONDecoder().decode(ExchangeResponse.self, from: data)
-            if result.result == "success" {
-                self.exchangeRate = result.conversion_rate
+            if result.result == "success", let cnyRate = result.rates["CNY"] {
+                self.exchangeRate = cnyRate
                 print("Fetched exchange rate: \(exchangeRate)")
             }
         } catch {
