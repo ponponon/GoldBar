@@ -21,10 +21,10 @@ struct GoldBarApp: App {
                 }
 
                 HStack(alignment: .bottom, spacing: 4) {
-                    Text("¥")
+                    Text(priceManager.selectedCurrency.symbol)
                         .font(.title2)
                         .foregroundColor(.secondary)
-                    Text(String(format: "%.2f", priceManager.currentPriceCNY))
+                    Text(String(format: "%.2f", priceManager.currentDisplayPrice))
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                     Text("/克")
                         .font(.caption)
@@ -33,11 +33,28 @@ struct GoldBarApp: App {
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("汇率: 1 USD ≈ \(String(format: "%.2f", priceManager.exchangeRate)) CNY")
+                    let rate = priceManager.exchangeRates[priceManager.selectedCurrency.rawValue] ?? 1.0
+                    Text("汇率: 1 USD ≈ \(String(format: "%.2f", rate)) \(priceManager.selectedCurrency.rawValue)")
                     Text("国际金价: $\(String(format: "%.2f", priceManager.currentPriceUSD))/盎司")
                 }
                 .font(.caption2)
                 .foregroundColor(.secondary)
+                
+                Divider()
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("切换币种：\(priceManager.selectedCurrency.name)")
+                        .font(.caption.bold())
+                        .foregroundColor(.secondary)
+                    
+                    Picker("", selection: $priceManager.selectedCurrency) {
+                        ForEach(Currency.allCases, id: \.self) { currency in
+                            Text(currency.rawValue).tag(currency)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
                 
                 HStack {
                     Text("涨跌幅:")
@@ -73,11 +90,13 @@ struct GoldBarApp: App {
                 }
             }
             .padding()
-            .frame(width: 220)
+            .frame(minWidth: 300)
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "goldbar.fill")
-                Text(String(format: "%.1f", priceManager.currentPriceCNY))
+                Text(String(format: "%.1f", priceManager.currentDisplayPrice))
+                Text(priceManager.selectedCurrency.rawValue)
+                    .font(.system(size: 10, weight: .bold))
                 Text(priceManager.isPositiveChange ? "▲" : "▼")
                     .foregroundColor(priceManager.isPositiveChange ? .green : .red)
             }
