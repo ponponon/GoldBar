@@ -10,6 +10,16 @@ struct ExchangeResponse: Codable {
     let rates: [String: Double]
 }
 
+struct ExchangeRatesOnlyResponse: Codable {
+    let rates: [String: Double]
+}
+
+struct PriceHistoryPoint: Identifiable {
+    let id = UUID()
+    let timestamp: Date
+    let priceUSD: Double
+}
+
 enum Currency: String, CaseIterable, Codable {
     case CNY = "CNY"
     case USD = "USD"
@@ -35,6 +45,28 @@ enum Currency: String, CaseIterable, Codable {
     }
 }
 
+enum RefreshIntervalOption: Double, CaseIterable, Codable, Identifiable {
+    case sec15 = 15
+    case sec30 = 30
+    case sec60 = 60
+    case sec120 = 120
+    
+    var id: Double { rawValue }
+    
+    var title: String {
+        switch self {
+        case .sec15:
+            return "15秒"
+        case .sec30:
+            return "30秒"
+        case .sec60:
+            return "1分钟"
+        case .sec120:
+            return "2分钟"
+        }
+    }
+}
+
 @MainActor
 class GoldPriceManager: ObservableObject {
     @Published var currentPriceUSD: Double = 0.0
@@ -44,11 +76,20 @@ class GoldPriceManager: ObservableObject {
             UserDefaults.standard.set(selectedCurrency.rawValue, forKey: "SelectedCurrency")
         }
     }
+    @Published var refreshIntervalOption: RefreshIntervalOption = .sec30 {
+        didSet {
+            UserDefaults.standard.set(refreshIntervalOption.rawValue, forKey: "RefreshIntervalSeconds")
+            startTimer()
+        }
+    }
     @Published var exchangeRates: [String: Double] = [:]
+    @Published var exchangeRateSource: String = "主接口"
+    @Published var priceHistory: [PriceHistoryPoint] = []
     @Published var lastUpdated: Date = Date()
     
     private var timer: AnyCancellable?
     private let ounceToGram: Double = 31.1034768
+    private let maxHistoryCount = 120
     
     var currentDisplayPrice: Double {
         convertUSDToSelectedCurrency(currentPriceUSD)
@@ -74,6 +115,10 @@ class GoldPriceManager: ObservableObject {
            let currency = Currency(rawValue: savedCurrency) {
             self.selectedCurrency = currency
         }
+        let savedInterval = UserDefaults.standard.double(forKey: "RefreshIntervalSeconds")
+        if let interval = RefreshIntervalOption(rawValue: savedInterval), savedInterval > 0 {
+            self.refreshIntervalOption = interval
+        }
         
         Task {
             await fetchExchangeRates()
@@ -83,7 +128,8 @@ class GoldPriceManager: ObservableObject {
     }
     
     func startTimer() {
-        timer = Timer.publish(every: 30, on: .main, in: .common)
+        timer?.cancel()
+        timer = Timer.publish(every: refreshIntervalOption.rawValue, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 Task {
@@ -94,17 +140,25 @@ class GoldPriceManager: ObservableObject {
     }
     
     func fetchExchangeRates() async {
-        guard let url = URL(string: "https://open.er-api.com/v6/latest/USD") else { return }
+        let providers: [(String, () async throws -> [String: Double])] = [
+            ("open.er-api.com", fetchRatesFromOpenER),
+            ("api.exchangerate-api.com", fetchRatesFromExchangeRateAPI),
+            ("frankfurter.app", fetchRatesFromFrankfurter)
+        ]
         
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let result = try JSONDecoder().decode(ExchangeResponse.self, from: data)
-            if result.result == "success" {
-                self.exchangeRates = result.rates
+        for (name, provider) in providers {
+            do {
+                let rates = try await provider()
+                if !rates.isEmpty {
+                    exchangeRates = rates
+                    exchangeRateSource = name
+                    return
+                }
+            } catch {
+                continue
             }
-        } catch {
-            print("Error fetching exchange rates: \(error)")
         }
+        print("Error fetching exchange rates: all providers failed")
     }
     
     func fetchPrice() async {
@@ -122,19 +176,53 @@ class GoldPriceManager: ObservableObject {
             
             self.currentPriceUSD = result.price
             lastUpdated = Date()
+            appendHistory(priceUSD: result.price)
         } catch {
             print("Error fetching gold price: \(error)")
             if currentPriceUSD == 0 {
                 let mockPrice = 2150.45
                 previousPriceUSD = mockPrice
                 currentPriceUSD = mockPrice
+                appendHistory(priceUSD: mockPrice)
             }
         }
+    }
+    
+    func displayPrice(for priceUSD: Double) -> Double {
+        convertUSDToSelectedCurrency(priceUSD)
     }
     
     private func convertUSDToSelectedCurrency(_ priceUSD: Double) -> Double {
         let rate = exchangeRates[selectedCurrency.rawValue] ?? defaultRate(for: selectedCurrency)
         return (priceUSD * rate) / ounceToGram
+    }
+    
+    private func appendHistory(priceUSD: Double) {
+        priceHistory.append(PriceHistoryPoint(timestamp: Date(), priceUSD: priceUSD))
+        if priceHistory.count > maxHistoryCount {
+            priceHistory.removeFirst(priceHistory.count - maxHistoryCount)
+        }
+    }
+    
+    private func fetchRatesFromOpenER() async throws -> [String: Double] {
+        guard let url = URL(string: "https://open.er-api.com/v6/latest/USD") else { return [:] }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let result = try JSONDecoder().decode(ExchangeResponse.self, from: data)
+        return result.result == "success" ? result.rates : [:]
+    }
+    
+    private func fetchRatesFromExchangeRateAPI() async throws -> [String: Double] {
+        guard let url = URL(string: "https://api.exchangerate-api.com/v4/latest/USD") else { return [:] }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let result = try JSONDecoder().decode(ExchangeRatesOnlyResponse.self, from: data)
+        return result.rates
+    }
+    
+    private func fetchRatesFromFrankfurter() async throws -> [String: Double] {
+        guard let url = URL(string: "https://api.frankfurter.app/latest?from=USD") else { return [:] }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let result = try JSONDecoder().decode(ExchangeRatesOnlyResponse.self, from: data)
+        return result.rates
     }
     
     private func defaultRate(for currency: Currency) -> Double {
