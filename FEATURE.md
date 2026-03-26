@@ -46,6 +46,12 @@
 - **即时生效**: 调整后立即重建定时器并生效。
 - **持久化**: 重启应用后自动恢复上次选择。
 
+### 8. 自动化打包工具 (Bundling Script)
+- **脚本名称**: `bundle.sh`
+- **功能**: 一键完成 Release 编译、创建 macOS `.app` 目录结构、生成 `Info.plist`。
+- **产物**: 在 `dist/` 目录下生成可以直接运行和移动的 `GoldBar.app`。
+- **系统要求**: 需要安装 Swift 5.7+ 并在 macOS 环境下运行。
+
 ## 🏗️ 技术实现方案
 - **框架**: SwiftUI (macOS 13+).
 - **架构**: MVVM (GoldPriceManager 作为 ObservableObject 控制数据流)。
